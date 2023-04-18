@@ -1,0 +1,329 @@
+---
+title: "YSA Regression"
+output: html_document
+---
+
+
+##Datamı importluyorum##
+
+```{r}
+library(readr)
+vgsales <- read_delim("vgsales.csv", ";", 
+    escape_double = FALSE, trim_ws = TRUE)
+View(vgsales)
+```
+##Datamdaki NA'ları siliyorum##
+
+```{r}
+vgsales_womiss<-na.omit(vgsales)
+```
+
+##Basit doldurma yöntemlerinden ortalama ile atama yapıyorum##
+
+```{r}
+vgsales_ort<-vgsales_womiss
+hist(vgsales_ort$Global_Sales)
+vgsales_ort$Global_Sales[is.na(vgsales_ort$Global_Sales)]<-mean(vgsales_ort$Global_Sales,na.rm=TRUE)#eksik gozlem varken problem olmamasi icin 
+```
+
+##Regresyon modeli oluşturmadan önce datamı train (%80) ve test (%20) olarak bölüyorum. Bu adım, modelimin datamın train kısmında çalışması sonrasında test kısmında da yakın sonuçları vermesine bağlı olarak başarı oranını anlamamda yardımcı olacak.(Bunu bir kilo peynirden bir dilim yedikten sonra peynirin arka kısmından da bir parça deneyerek tadı iki tarafta da aynı mı diye kontrol etmeye benzetebiliriz)##
+
+```{r}
+library(caret)
+set.seed(74367432)
+train_id<-createDataPartition(vgsales_womiss$Global_Sales, p=0.80,
+                              list=FALSE,
+                              times=1)
+train<-vgsales_womiss[train_id,]
+test<-vgsales_womiss[-train_id,]
+```
+
+##Belli modeller oluşturup aralarından seçim yapmadan önce, datama bazı değişkenlerin farklı versiyonlarını ekliyorum. Yani bağımlı değişenime logaritmik; regresyon modeli kurarken modelimin verimini arttıracağını düşündüğüm bir başka değişkenime kök dönüşümü yaptırıyorum.##
+
+```{r}
+train$Global_Sales_log<-log(train$Global_Sales) #Global_Sales'de logaritmik dönüsüm
+train$EU_Sales_kok<-sqrt(train$EU_Sales) #EU_Sales'de kok dönüsümü
+train$EU_Sales_kok_merk<-(train$EU_Sales_kok-mean(train$EU_Sales_kok))
+```
+
+##Yukarıda da bahsettiğim gibi kurduğum modeli test verimde denemek için yaptığım dönüşümleri ve yeni değişken elde etme kısmını yine test verim için de yapıyorum.##
+
+```{r}
+test$Global_Sales_log<-log(test$Global_Sales) #Global_Sales'de logaritmik dönüsüm
+test$EU_Sales_kok<-sqrt(test$EU_Sales) #EU_Sales'de kok dönüsümü
+test$EU_Sales_kok_merk<-(test$EU_Sales_kok-mean(test$EU_Sales_kok))
+```
+
+##Aklımda modellerimi oluştururken seçtiğim merkezileştirilmiş değişkenimin karesini veya kübünü hesaplayarak (kendisiyle çarparak) çoğaltıp, oluşabilecek fiziksel ilişkiyi (çoklu bağlantının modelimin sağlıklı olmasını engellememesi için) elimine ediyorum.##
+
+##Merkezileştirdiğim değişkenimin karesel terimlerine bakarken her kök değişkenimden çıkarmam için ortalama değere ihtiyacım vardı. Bu fark alma işlemini yaptıktan sonra EU_Sales_kok_merk değişlenimi de oluşturmuş oldum.##
+
+##Logaritmik dönüşüm yaptırdığım Global_Sales bağımlı değişkenimi grafikte aradan geçirdim ve diğer iki doğruyu kök dönüşümü yaptığım EU_Salesin karesi ile kübü olarak belirledim. Hangi doğrunun noktaları daha iyi temsil ettiğine baktım.Ve doğru bir bağımlı değişken seçtiğimde karar kıldım##
+
+```{r}
+#köklü EU_Salesi merkezilestirip karesel terimlerine bakma:
+mean_EU_Saleskok<-mean(train$EU_Sales_kok)
+train$EU_Sales_kok_merk<-(train$EU_Sales_kok-mean_EU_Saleskok)
+
+ggplot(train, aes(x = EU_Sales_kok_merk, y =Global_Sales_log )) +
+  stat_smooth(method = "lm", se = FALSE, color = "pink", formula = y ~ x) +
+  stat_smooth(method = "lm", se = FALSE, color = "lightblue", formula = y ~ x + I(x ^ 2)) +
+  stat_smooth(method = "lm", se = FALSE, color = "violet", formula = y ~ x + I(x ^ 2)+ I(x ^ 3)) +
+  geom_point(colour = "black", size = 1)+
+  geom_text(label=rownames(train),nudge_x=0.05,check_overlap=T,size=2.5)
+```
+
+##Diğer numeric değişkenlerimle bağımlı değişkenimi(Global_Sales) model oluşturmak adına modelliyorum##
+
+##Modellerimde R-squared değerleri yerine Adjusted R-Squared değerlerine bakıyorum.Çünkü çoklu regresyonda R-squared değeri anlamlı ya da anlamsız her değişken eklediğimizde artar. Anlamlılık yönünden bakabilmek adına ilk etapta Adjusted R-Squared değerlerine bakıyorum.##
+
+##Modellerimi oluşturduktan sonra tahminleme fonksiyonu ile kontrol edip modelimin performansına bakarken; oluşturacağım diğer modellerle karşılaştırıp karar vermek için Model_res olarak atamalar yapıyorum.##
+
+
+
+##Model1 için Adjusted R-Squared = 0.3180##
+```{r}
+Model1<-lm(Global_Sales_log ~ EU_Sales + NA_Sales + JP_Sales , data=train)
+summary(Model1)
+```
+```{r}
+Model1_res<-as.data.frame(t(defaultSummary(data.frame(obs=train$Global_Sales_log,pred=predict(Model1,train)))))
+rownames(Model1_res)<-"Model1"
+```
+
+
+
+
+
+
+
+##Model2 için Adjusted R-Squared = 0.5308##
+```{r}
+Model2<-lm(Global_Sales_log ~ EU_Sales_kok + Other_Sales, data = train)
+summary(Model2)
+```
+```{r}
+Model2_res<-as.data.frame(t(defaultSummary(data.frame(obs=train$Global_Sales_log,pred=predict(Model2,train)))))
+rownames(Model2_res)<-"Model2"
+```
+
+
+
+
+
+##Model3 için Adjusted R-Squared = 0.5652##
+```{r}
+Model3<-lm(Global_Sales_log ~ EU_Sales_kok_merk + I(EU_Sales_kok_merk^2)+I(EU_Sales_kok_merk^3) , data = train)
+summary(Model3)
+```
+```{r}
+Model3_res<-as.data.frame(t(defaultSummary(data.frame(obs=train$Global_Sales_log,pred=predict(Model3,train)))))
+rownames(Model3_res)<-"Model3"
+```
+
+
+
+
+
+
+##Model4 için Adjusted R-Squared = 0.5491##
+```{r}
+Model4<-lm(Global_Sales_log ~ EU_Sales_kok + NA_Sales + JP_Sales, data = train)
+summary(Model4)
+```
+```{r}
+Model4_res<-as.data.frame(t(defaultSummary(data.frame(obs=train$Global_Sales_log,pred=predict(Model4,train)))))
+rownames(Model4_res)<-"Model4"
+```
+
+
+
+
+
+##Model5 için Adjusted R-Squared = 0.1105##
+```{r}
+Model5<-lm(Global_Sales_log ~ JP_Sales, data = train)
+summary(Model5)
+```
+```{r}
+Model5_res<-as.data.frame(t(defaultSummary(data.frame(obs=train$Global_Sales_log,pred=predict(Model5,train)))))
+rownames(Model5_res)<-"Model5"
+```
+
+
+
+##Yeterli model oluşturduktan sonra artık R-squared (Adjusted R-square değerlerine çok yakın olduğunu gözlemliyorum)ve MAE değerlerine bakarak karşılaştırma yapmak istiyorum, bunun için rbind fonksiyonumla alt alta sıralama yapıyorum.##
+
+##Model 3'ün R-squared değeri en büyük ve MAE(hata) değeri en küçük olduğu için şimdilik bu modelde karar kılıyorum.##
+```{r}
+round(rbind(Model1_res,Model2_res,Model3_res,Model4_res,Model5_res),3)
+```
+
+##Modelimin geçerliliğini kontrol için en başta %20 olarak ayırdığım test verimde çalıştırıyorum.##
+```{r}
+Model1_res_test<-as.data.frame(t(defaultSummary(data.frame(obs=test$Global_Sales_log,pred=predict(Model1,test)))))
+rownames(Model1_res_test)<-"Model1"
+Model2_res_test<-as.data.frame(t(defaultSummary(data.frame(obs=test$Global_Sales_log,pred=predict(Model2,test)))))
+rownames(Model2_res_test)<-"Model2"
+Model3_res_test<-as.data.frame(t(defaultSummary(data.frame(obs=test$Global_Sales_log,pred=predict(Model3,test)))))
+rownames(Model3_res_test)<-"Model3"
+Model4_res_test<-as.data.frame(t(defaultSummary(data.frame(obs=test$Global_Sales_log,pred=predict(Model4,test)))))
+rownames(Model4_res_test)<-"Model4"
+Model5_res_test<-as.data.frame(t(defaultSummary(data.frame(obs=test$Global_Sales_log,pred=predict(Model5,test)))))
+rownames(Model5_res_test)<-"Model5"
+```
+
+
+
+##R-squared ve MAE değerlerine bakarak yaptığım karşılaştırmayı test verimde tekrar kontrol ediyorum.##
+
+##Tes verimde de Model 3'ün R-squared değeri en büyük ve MAE(hata) değeri bu kez en küçük olmasa da train verimdeki değerine yakın olduğu ve yine aralarından en büyük olmadığı için bu modelde kararlı olmaya devam ediyorum.## 
+```{r}
+round(rbind(Model1_res,Model2_res_test,Model3_res_test,Model4_res_test,Model5_res_test),2)
+```
+
+##Her ne kadar R-squared ve MAE değerlerine bakarak Model3'ü seçmiş de olsam, oluşturduğum her modelin tek tek grafiklerini, grafiklerindeki saçılımları inceliyorum.##
+
+
+##Model1 için Residuals vs Fitted grafiğime baktığımda sayıların çizgiye düzenli dağıldığını ama bütün alana yayılmadığını görüyorum, değişen varyans problemi var diyebilirim##
+##Normal Q-Q grafiğime baktığımda aykırı değerleri gözlemleyebiliyorum ve bu modelde düzensiz olduğunu gözlemlediğim için en sağlıklı model olarak Model1'i seçmiyorum.## 
+```{r}
+library(ggfortify)
+autoplot(Model1)
+```
+
+
+##Model2 için Residuals vs Fitted grafiğime baktığımda sayıların çizgiye çok da düzenli dağılmadığını ve yine bütün alana yayılmadığını görüyorum, değişen varyans problemi var diyebilirim.##
+##Normal Q-Q grafiğime baktığımda aykırı değerleri gözlemleyebiliyorum ve bu modelde düzensiz olduğunu gözlemlediğim için en sağlıklı model olarak Model2'yi seçmiyorum.## 
+```{r}
+library(ggfortify)
+autoplot(Model2)
+```
+
+##Model3 için Residuals vs Fitted grafiğime baktığımda bu kez noktaların çizginin etrafında yayıldığını ve kutuya diğer grafiklere nazaran daha homojen yayıldığını gözlemliyorum,değişen varyans problemi yok diyebilirim.##
+##Normal Q-Q grafiğime baktığımda yine aykırı değerleri gözlemleyebiliyorum ama bu model diğerlerine göre daha düzenli olduğu için aykırı değerleri silmeye karar veriyorum. Ve en sağlıklı model olarak Model3'de kalmaya devam ediyorum.## 
+```{r}
+library(ggfortify)
+autoplot(Model3)
+```
+
+##Model4 için Residuals vs Fitted grafiğime baktığımda Model2'deki gibi sayıların çizgiye çok da düzenli dağılmadığını ve bütün alana yayılmadığını görüyorum, değişen varyans problemi var diyebilirim.##
+##Normal Q-Q grafiğime baktığımda aykırı değerlerdeki süreksizliği gözlemleyebiliyorum ve bu modelde düzensiz olduğunu gözlemlediğim için en sağlıklı model olarak Model4'ü seçmiyorum.## 
+```{r}
+library(ggfortify)
+autoplot(Model4)
+```
+
+##Model2 için Residuals vs Fitted grafiğime baktığımda Model2 ve Model4'deki gibi sayıların çizgiye çok da düzenli dağılmadığını ve bütün alana yayılmadığını görüyorum,değişen varyans problemi var diyebilirim##
+##Normal Q-Q grafiğime baktığımda aykırı değerlerdeki kopukluğu gözlemleyebiliyorum ve bu modelde düzensiz olduğunu gözlemlediğim için en sağlıklı model olarak Model5'i seçmiyorum.## 
+```{r}
+library(ggfortify)
+autoplot(Model5)
+```
+
+
+
+
+
+
+
+
+PRESS DEĞERİ: i.gözlemin çıkarılmasıyla kalan (n-1) gözlemlerle tekrar denklemin kestirilip artıkların hesaplanmasıdır.
+##Artıklardan en küçük olanı o model için geçerliliği arttırır, yani press değeri ne kadar küçükse model o kadar geçerlidir.##
+##Press değerlerine baktığımızda yine Model3'ün artık değerinin diğer modellerinkine göre daha düşük olduğunu görüyorum ve  Model performansa bakmak için devam ediyorum.##
+
+```{r}
+list2<-list(Model1,Model2,Model3,Model4,Model5)
+
+PRESS <- function(linmodel) {   pr <- residuals(linmodel)/(1 - lm.influence(linmodel)$hat)
+sum(pr^2)
+}
+```
+
+```{r}
+for (i in list2) {
+  print(paste("Press:",round(PRESS(i),3)))
+}
+```
+
+
+
+
+
+
+##Model performans##
+##train:##
+```{r}
+round(defaultSummary(data.frame(obs=train$Global_Sales,pred=predict(Model3,train))),2)
+```
+
+##test:##
+```{r}
+round(defaultSummary(data.frame(obs=test$Global_Sales,pred=predict(Model3,test))),2)
+```
+
+
+
+
+##Kurduğum modeli yazdırdığım nesne:## 
+```{r}
+library(ggfortify)
+autoplot(Model3)
+```
+
+
+##Gördüğüm aykırı değerleri verimden çıkarıyorum ve bu verimi train_new olarak atıyorum. Tekrar aynı modeli çalıştırıyorum ve adjusted r square değerimin düşmemiş ; standart hata değerimin yükselmemiş olmasına dikkat ediyorum.##
+```{r}
+train_new<-train[-c(36,165),]
+Model3_new<-lm(Global_Sales_log ~ EU_Sales_kok_merk + I(EU_Sales_kok_merk^2)+I(EU_Sales_kok_merk^3) , data = train)
+summary(Model3_new)
+```
+
+
+
+##PREDICTIONS##
+
+Model başarısını ne ölçüde sağladığıma bakmak için tahmin fonksiyonlarımı kullanıyorum. Model3'ü predict fonksiyonumla rain ve test verim için çalıştırarak kontrol ediyorum. Eğer train verisinde kurduğumuz model test verisi ile  yani hiç görmediği bir veri ile denendiğinde aynı ya da yakın sonuçları veriyorsa model geçerli diyebilirim.##
+
+```{r}
+defaultSummary(data.frame(obs=train$Global_Sales_log,pred=predict(Model3_new,train)))
+```
+
+```{r}
+defaultSummary(data.frame(obs=test$Global_Sales_log,pred=predict(Model3_new,test)))
+```
+
+##İki veri için de prediction uygulamasında aynı Modelin sonuçları birbirine yakın outputlar verdi. Yani modelimin geçerli olduğunu rahatlıkla söyleyebiliyor ve şema kısmına geçebiliyorum.##
+
+```{r}
+library(rpart)
+library(rpart.plot)
+
+cart<-rpart(Global_Sales_log ~ EU_Sales_kok_merk + I(EU_Sales_kok_merk^2)+I(EU_Sales_kok_merk^3) , data = train)
+cart$variable.importance
+```
+
+```{r}
+rpart.plot(cart)
+```
+
+
+##Predict(cart) tahminlemesi##
+
+##Yine ilk yaptığım predict uygulamasında olduğu gibi bu kez cart için train ve test verimde tahminleme yapıyorum. Değerlerimin yakın çıktığını gözlemliyorum ve şemamın da geçerli olduğunu anlamış oluyorum.##
+
+##train icin:##
+```{r}
+defaultSummary(data.frame(obs=train$Global_Sales_log,pred=predict(cart,train)))
+```
+
+##test icin:##
+```{r}
+defaultSummary(data.frame(obs=test$Global_Sales_log,pred=predict(cart,test)))
+```
+
+
+##R-Squarelerine ve MSE değerlerine bakarak datasetime regresyon uygulaması yaptım ve en iyi modeli belirlemiş oldum. Bu problemdeki en iyi model, açıklamalarımdan ve hesaplayarak kanıtlamış olduğum değerlerden de anlaşıldığı üzere Model 3'tür.##
+
+
+
